@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """Comprehensive test suite for action parser and integration."""
 
-from src.agents.actions.parsing.parser import SimpleActionParser
-from src.agents.actions.entities.actions import (
+import asyncio
+import pytest
+from multi_agent_coding_system.agents.actions.parsing.parser import SimpleActionParser
+from multi_agent_coding_system.agents.actions.entities.actions import (
     BashAction, FinishAction, BatchTodoAction,
     ReadAction, WriteAction, EditAction, MultiEditAction, FileMetadataAction,
-    GrepAction, GlobAction, LSAction,
+    GrepAction, GlobAction,
     AddNoteAction, ViewAllNotesAction,
     TaskCreateAction, AddContextAction, LaunchSubagentAction, ReportAction,
     WriteTempScriptAction
 )
-from src.agents.actions.parsing.action_handler import ActionHandler
-from src.agents.env_interaction.turn_executor import TurnExecutor
-from src.agents.actions.state_managers import TodoManager, ScratchpadManager
+from multi_agent_coding_system.agents.actions.parsing.action_handler import ActionHandler
+from multi_agent_coding_system.agents.env_interaction.turn_executor import TurnExecutor
+from multi_agent_coding_system.agents.actions.state_managers import TodoManager, ScratchpadManager
 
 
 class TestActionParser:
@@ -161,17 +163,7 @@ action: glob
 pattern: "**/*.test.js"
 path: "/tests"
 </search>""", GlobAction, {"pattern": "**/*.test.js", "path": "/tests"}),
-            
-            # LS action
-            ("""<search>
-action: ls
-path: "/home/user/projects"
-ignore:
-  - ".git"
-  - "__pycache__"
-  - "node_modules"
-</search>""", LSAction, {"path": "/home/user/projects"}),
-        ]
+          ]
         
         for xml_content, expected_type, expected_attrs in test_cases:
             actions, errors, found = self.parser.parse_response(xml_content)
@@ -277,7 +269,7 @@ comments: "Analysis complete with 2 critical findings"
     def test_finish_action(self):
         """Test parsing of finish action."""
         xml = """<finish>
-message: "Task completed successfully with all tests passing"
+Task completed successfully with all tests passing
 </finish>"""
         
         actions, errors, found = self.parser.parse_response(xml)
@@ -328,7 +320,7 @@ operations:
 </todo>
 
 <finish>
-message: "Setup completed"
+Setup completed
 </finish>
 """
         
@@ -405,15 +397,16 @@ cmd: "echo 'Only this should be parsed'"
 
 class TestActionIntegration:
     """Test integration between parser, handler, and executor."""
-    
-    def test_turn_executor_integration(self):
+
+    @pytest.mark.asyncio
+    async def test_turn_executor_integration(self):
         """Test that parser integrates correctly with TurnExecutor."""
         # Mock command executor
         class MockExecutor:
-            def execute(self, cmd, timeout=None):
+            async def execute(self, cmd, timeout=None):
                 return f"Executed: {cmd}", 0
-            
-            def execute_background(self, cmd):
+
+            async def execute_background(self, cmd):
                 return f"Background: {cmd}"
         
         # Create components
@@ -447,12 +440,12 @@ view_all: true
 </todo>
 
 <finish>
-message: "Integration test complete"
+Integration test complete
 </finish>
 """
         
-        result = turn_executor.execute(test_input)
-        
+        result = await turn_executor.execute(test_input)
+
         assert result.done is True
         assert result.finish_message == "Integration test complete"
         assert len(result.actions_executed) == 3
@@ -472,7 +465,7 @@ file_path: "/test.txt"</file>
 pattern: "test"</search>
 <scratchpad>action: add_note
 content: "note"</scratchpad>
-<finish>message: "done"</finish>
+<finish>done</finish>
 """
         
         actions, errors, found = parser.parse_response(test_input)
@@ -515,10 +508,34 @@ if __name__ == "__main__":
     test_parser.test_error_handling()
     print("✓ Error handling")
     
-    # Integration test
+    test_parser.test_search_operations()
+    print("✓ Search operations")
+    
+    test_parser.test_scratchpad_operations()
+    print("✓ Scratchpad operations")
+    
+    test_parser.test_task_management_operations()
+    print("✓ Task management operations")
+    
+    test_parser.test_report_action()
+    print("✓ Report action")
+    
+    test_parser.test_finish_action()
+    print("✓ Finish action")
+    
+    test_parser.test_write_temp_script()
+    print("✓ Write temp script")
+    
+    test_parser.test_ignored_tags()
+    print("✓ Ignored tags")
+    
+    # Integration tests
     test_integration = TestActionIntegration()
-    test_integration.test_turn_executor_integration()
+    asyncio.run(test_integration.test_turn_executor_integration())
     print("✓ TurnExecutor integration")
+    
+    test_integration.test_action_handler_compatibility()
+    print("✓ Action handler compatibility")
     
     print("\n✅ All tests passed!")
     

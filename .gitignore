@@ -1,5 +1,7 @@
 runs/
 logs/
+session_logs/
+rl_training/datasets/raw/
 
 .DS_Store
 

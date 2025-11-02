@@ -3,18 +3,25 @@ name = "multi-agent-coding-system"
 version = "0.1.0"
 description = "A multi-agent AI coder. Reached #12 on Stanford's TerminalBench"
 readme = "README.md"
-requires-python = ">=3.12.9"
+requires-python = ">=3.12"
 dependencies = [
-    "terminal-bench",
+    "terminal-bench @ git+https://github.com/laude-institute/terminal-bench.git@main",
     "litellm>=1.72.6",
     "pyyaml>=6.0.2",
     "pydantic>=2.11.5",
+    "aiodocker>=0.24.0",
+    "aiofiles>=24.1.0",
 ]
 
-[tool.setuptools]
-packages = ["src"]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
+[tool.hatch.metadata]
+allow-direct-references = true
 
-[tool.uv.sources]
-multi-agent-coding-system = { workspace = true }
-terminal-bench = { git = "https://github.com/Danau5tin/terminal-bench-py311.git", branch = "main" }
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+    "pytest-asyncio>=0.24.0",
+]

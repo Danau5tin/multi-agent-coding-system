@@ -7,6 +7,24 @@ TL;DR:
 
 ![Orchestrator with claude-sonnet-4 on standford's terminal bench](./readme_imgs/orchestrator-sonnet-4-stanford-terminal-bench-leaderboard.png)
 
+## 📰 Releases
+
+### (2nd Nov 25)
+- New system & agent abilities:
+  - Orchestrator & Subagent can be different models
+  - App now fully async
+  - App now a package so other projects can depend on it
+  - Agents receive a snapshot of the environment on startup
+  - Agent can reference task id's as context refs to inject all of that task's contexts into a subagent
+  - New Single/Distributed Node Docker Manager (used in tests, but mostly by RL)
+  - Bug fixes
+
+### (2nd Sept 25) 🤓 Orchestrator - multi-agent-coder 
+
+- Agentic AI system placing #12 on Stanford's Terminal Bench (not for very long, so screenshot above shows #13 😅)
+- This placed higher than Claude Code
+- All orchestration code open sourced
+
 ## How the System Works
 
 ![System architecture overview](readme_imgs/orch_agent_sys_arch.png)

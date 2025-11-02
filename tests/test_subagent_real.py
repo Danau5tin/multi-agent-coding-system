@@ -1,166 +1,238 @@
 #!/usr/bin/env python3
-"""Test script for Subagent with real LiteLLM calls."""
-
-import logging
+import asyncio
 import os
-import sys
-import subprocess
+
+from multi_agent_coding_system.misc.async_docker_container_manager import (
+    AsyncDockerContainerManager,
+)
+
 import time
 import uuid
+import tempfile
+import shutil
 
-from src.agents.env_interaction.command_executor import DockerExecutor
-from src.agents.subagent import Subagent, SubagentTask
+from multi_agent_coding_system.agents.env_interaction.command_executor import (
+    DockerExecutor,
+)
+from multi_agent_coding_system.agents.subagent import Subagent, SubagentTask
+from multi_agent_coding_system.agents.actions.orchestrator_hub import OrchestratorHub
+from multi_agent_coding_system.agents.actions.hierarchical_task_manager import (
+    HierarchicalTaskManager,
+)
+from multi_agent_coding_system.misc.session_logger import (
+    SessionLogger,
+    SubagentSessionTracker,
+    AgentType,
+)
+from pathlib import Path
 
-# Add src to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import logging
 
-
-
-logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
-def test_subagent_file_creation(model: str, temperature=0.1):
-    """Test subagent with a simple file creation task."""
-    
-    print(f"\n{'='*60}")
-    print(f"Testing with model: {model}")
-    print(f"Temperature: {temperature}")
-    print('='*60)
-    
+async def test_subagent_simple_task(
+    instruction: str, run_id: str, temperature=0.1, logging_dir=None
+):
+    """Test subagent with a simple task.
+
+    Args:
+        instruction: The task instruction to execute
+        temperature: LLM temperature setting
+        logging_dir: Optional directory for turn-by-turn logging
+    """
     # Generate unique container name
-    container_name = f"test_subagent_{uuid.uuid4().hex[:8]}"
-    
+    container_name = f"test_subagent_{run_id}"
+
+    # Set up logging directory if requested
+    if logging_dir:
+        logging_path = Path(logging_dir)
+        logging_path.mkdir(exist_ok=True, parents=True)
+        print(f"Logging turns to: {logging_path}")
+    else:
+        logging_path = None
+
+    # Initialize SessionLogger
+    session_logger = SessionLogger(
+        logging_dir=logging_path, session_id=run_id, agent_type=AgentType.SUBAGENT
+    )
+    await session_logger.start_session(
+        task=instruction,
+        metadata={"temperature": temperature, "container_name": container_name},
+    )
+
+    # Create temporary directory for Dockerfile
+    temp_dir = tempfile.mkdtemp(prefix="test_subagent_")
+    dockerfile_content = """FROM ubuntu:latest
+RUN apt-get update && apt-get install -y bash
+WORKDIR /workspace
+CMD ["/bin/bash"]
+"""
+
+    # Initialize the Docker manager
+    manager = AsyncDockerContainerManager()
+    container_id = None
+
     try:
-        # Start Docker container
-        print(f"Starting Docker container: {container_name}")
-        subprocess.run([
-            'docker', 'run', '-d', '--rm',
-            '--name', container_name,
-            'ubuntu:latest',
-            'sleep', 'infinity'
-        ], check=True, capture_output=True)
-        
-        # Wait for container to be ready
-        time.sleep(2)
-        
-        # Create work directory in container
-        subprocess.run([
-            'docker', 'exec', container_name,
-            'mkdir', '-p', '/workspace'
-        ], check=True)
-        
-        # Create command executor with Docker
-        executor = DockerExecutor(container_name)
-        
-        # Change to workspace directory in container
-        executor.execute("cd /workspace")
-        
-        # Create task
-        task = SubagentTask(  # noqa: F821
-            agent_type="coder",
-            title="Create hello.txt with content",
-            description=(
-                "Create a file called \"hello.txt\" in /workspace with the exact content "
-                "\"Hello, world!\" followed by a newline character.\n\n"
-                "Requirements:\n"
-                "- File must be named exactly \"hello.txt\" in /workspace\n"
-                "- Content must be exactly \"Hello, world!\" with a newline at the end\n"
-                "- Do not create any other files or folders\n"
-                "- Verify the file was created correctly by reading it back\n\n"
-                "Please confirm successful creation by showing the file contents and "
-                "verifying it ends with a newline."
-            ),
-            ctx_store_ctxts={},
-            bootstrap_ctxts=[]
+        # Write Dockerfile to temp directory
+        dockerfile_path = Path(temp_dir) / "Dockerfile"
+        dockerfile_path.write_text(dockerfile_content)
+
+        # Start Docker container using the manager
+        print(f"Starting Docker container with image: {container_name}")
+        await manager._ensure_initialized()
+        container_id = await manager.spin_up_container_from_dir(
+            build_context_dir=temp_dir, image_name=container_name
         )
-        
-        # Create subagent with specified model
+        print(f"Container started with ID: {container_id}")
+
+        # Use container ID for DockerExecutor
+        executor = DockerExecutor(container_id)
+
+        # Initial check for files (this was in original code)
+        num_text_files_str, _ = await executor.execute(
+            cmd="ls *.txt 2>/dev/null | wc -l", timeout=5
+        )
+
+        # Wait a moment for container to stabilize
+        await asyncio.sleep(1)
+
+        # Create orchestrator hub for context management
+        task_manager = HierarchicalTaskManager()
+        orchestrator_hub = OrchestratorHub(
+            agent_id="test_orchestrator", task_manager=task_manager
+        )
+
+        # Create SubagentTask
+        task = SubagentTask(
+            agent_type="coder",
+            title="Execute instruction",
+            description=instruction,
+            max_turns=15,
+            ctx_store_ctxts={},
+            bootstrap_ctxts=[],
+        )
+
+        # Create subagent
+        agent_id = f"test_sub_{uuid.uuid4().hex[:8]}"
+
+        # Create SubagentSessionTracker
+        subagent_tracker = SubagentSessionTracker(
+            parent_logger=session_logger,
+            agent_id=agent_id,
+            agent_type="coder",
+            task_title="Execute instruction",
+            task_description=instruction,
+            max_turns=15,
+        )
+
         subagent = Subagent(
+            agent_id=agent_id,
             task=task,
             executor=executor,
-            max_turns=10,
-            model=model,
+            orchestrator_hub=orchestrator_hub,
             temperature=temperature,
+            session_tracker=subagent_tracker,
+            logging_dir=logging_path,
         )
-        
-        # Run the task
+
         print("\nExecuting task...")
-        report = subagent.run()
-        
+        report = await subagent.run()
+
         # Display results
-        print(f"\n{'='*40}")
-        print("REPORT:")
-        print(f"{'='*40}")
+        print(f"\n{'=' * 40}")
+        print("EXECUTION RESULT:")
+        print(f"{'=' * 40}")
         print(f"Comments: {report.comments}")
         print(f"\nContexts ({len(report.contexts)}):")
         for ctx in report.contexts:
-            print(f"  - {ctx.id}: {ctx.content[:100]}..." 
-                  if len(ctx.content) > 100 else f"  - {ctx.id}: {ctx.content}")
-        
-        # Check if file was created in container
-        output, exit_code = executor.execute("cat /workspace/hello.txt")
-        if exit_code == 0:
-            print(f"\n✓ File created successfully in container!")
-            print(f"  Content: {repr(output)}")
-            if output == "Hello, world!\n":
-                print("  ✓ Content matches expected value exactly")
-            else:
-                print("  ✗ Content does not match expected value")
-        else:
-            print("\n✗ File was not created in container")
-        
+            print(
+                f"  - {ctx.id}: {ctx.content[:100]}..."
+                if len(ctx.content) > 100
+                else f"  - {ctx.id}: {ctx.content}"
+            )
+
         # Show trajectory summary
+        turns_executed = 0
         if report.meta and report.meta.trajectory:
-            print(f"\nTrajectory: {len(report.meta.trajectory)} messages")
             # Subtract system and initial user message
-            print(f"  Turns taken: {(len(report.meta.trajectory) - 2) // 2}")
-        
+            turns_executed = (len(report.meta.trajectory) - 2) // 2
+            print(f"Turns executed: {turns_executed}")
+
+        # Check if files were created in container
+        print(f"\n{'=' * 40}")
+        print("VERIFICATION:")
+        print(f"{'=' * 40}")
+
+        # Check 5 txt files exist using the manager's execute_command
+        stdout, stderr = await manager.execute_command(
+            container_id=container_id,
+            command="cd /workspace && ls *.txt 2>/dev/null | wc -l",
+        )
+        num_text_files = stdout.strip() if stdout else "0"
+
+        if num_text_files and int(num_text_files) >= 5:
+            print(f"✓ Found {num_text_files} .txt files in /workspace")
+        else:
+            print(f"✗ Expected 5 .txt files, but found {num_text_files}")
+            stdout, stderr = await manager.execute_command(
+                container_id=container_id, command="cd /workspace && ls -l"
+            )
+            print("  - Listing files in /workspace:")
+            print(stdout)
+
+        # Finish subagent tracking
+        await subagent_tracker.finish(report=report.to_dict())
+
+        # End session
+        await session_logger.end_session(
+            reason="completed" if report and report.comments else "failed"
+        )
+
         return report
-        
+
     finally:
-        # Clean up Docker container
+        # Clean up Docker container and temporary directory
         try:
-            print(f"\nStopping and removing container: {container_name}")
-            subprocess.run(['docker', 'stop', container_name], 
-                         capture_output=True, timeout=10)
+            if container_id:
+                print(f"\nStopping and removing container: {container_id}")
+                await manager.close_container(container_id)
+            await manager.close()
         except Exception as e:
             print(f"Error cleaning up container: {e}")
 
-
-def main():
-    """Main test runner."""
-    
-    # Test with different models if you want
-    models_to_test = [
-        ("anthropic/claude-sonnet-4-20250514", 0.1),
-        # ("openai/gpt-5-2025-08-07", 1),
-        # ("openrouter/qwen/qwen3-coder", 0.1),
-        # ("openrouter/z-ai/glm-4.5", 0.1),
-        # ("openrouter/deepseek/deepseek-chat-v3.1", 0.1),
-    ]
-    
-    # Check for environment variables
-    if not os.getenv("LITE_LLM_API_KEY") and not os.getenv("LITELLM_API_KEY"):
-        print("Warning: No API key found in LITE_LLM_API_KEY or LITELLM_API_KEY")
-        print("You may need to set one of these environment variables")
-    
-    results = []
-    for model, temp in models_to_test:
+        # Clean up temp directory
         try:
-            report = test_subagent_file_creation(model=model, temperature=temp)
-            results.append((model, "SUCCESS", report))
+            shutil.rmtree(temp_dir)
         except Exception as e:
-            print(f"\n✗ Error with model {model}: {e}")
-            results.append((model, "FAILED", str(e)))
-    
-    # Summary
-    print(f"\n{'='*60}")
-    print("SUMMARY")
-    print('='*60)
-    for model, status, _ in results:
-        print(f"{model}: {status}")
+            print(f"Error cleaning up temp directory: {e}")
+
+
+async def main():
+    """Main test runner."""
+
+    os.environ["LITE_LLM_API_KEY"] = ""  # TODO: Set this
+
+    os.environ["ORCA_SUBAGENT_MODEL"] = (
+        "openrouter/qwen/qwen3-coder-30b-a3b-instruct"
+        # "openrouter/x-ai/grok-code-fast-1"
+        # "openrouter/qwen/qwen3-coder"
+        # "openrouter/qwen/qwen3-32b"
+        # "openrouter/qwen/qwen3-next-80b-a3b-instruct"
+    )
+    instruction = (
+        "Create 5 txt files, each with a poem about a different programming language."
+    )
+    time_stamp_dd_mm_hh_mm = time.strftime("%d_%H%M", time.localtime())
+    run_id = time_stamp_dd_mm_hh_mm + uuid.uuid4().hex[:8]
+
+    logging_dir = f"logs/test_subagent/{run_id}/"
+
+    await test_subagent_simple_task(
+        instruction=instruction, run_id=run_id, temperature=0.1, logging_dir=logging_dir
+    )
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

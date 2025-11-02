@@ -1,0 +1,79 @@
+FROM ghcr.io/laude-institute/t-bench/python-3-13:20250620
+
+WORKDIR /app
+
+# Install pandas for the inefficient script
+RUN pip install pandas
+
+# Create the inefficient Python script
+COPY <<'PYCODE' /app/process_data.py
+import pandas as pd
+import time
+
+def calculate_stuff():
+    """Inefficient script with obvious bottlenecks"""
+    # Read CSV file
+    df = pd.read_csv('/app/dataset.csv')
+    
+    # Bottleneck 1: Row-by-row iteration instead of vectorized operations
+    results = []
+    for index, row in df.iterrows():
+        # Inefficient calculation that should be vectorized
+        result = row['value1'] * 2 + row['value2'] * 3
+        results.append(result)
+    
+    # Bottleneck 2: Appending to list in loop instead of vectorized operation
+    processed_values = []
+    for i in range(len(df)):
+        if df.iloc[i]['value1'] > 50:
+            processed_values.append(df.iloc[i]['value1'] * df.iloc[i]['value2'])
+        else:
+            processed_values.append(0)
+    
+    # Bottleneck 3: Using iterrows() for filtering
+    filtered_data = []
+    for index, row in df.iterrows():
+        if row['value2'] > 25:
+            filtered_data.append(row.to_dict())
+    
+    # Save main output without timing
+    output_lines = [
+        f"Processed {len(df)} rows",
+        f"Results count: {len(results)}",
+        f"Filtered data count: {len(filtered_data)}"
+    ]
+    
+    for line in output_lines:
+        print(line)
+
+if __name__ == "__main__":
+    start_time = time.time()
+    calculate_stuff()
+    end_time = time.time()
+    print(f"Execution time: {end_time - start_time:.2f} seconds")
+PYCODE
+
+RUN cp /app/process_data.py /app/inefficient_script.py
+
+# Generate CSV file with 100,000 rows
+COPY <<'CSVGEN' /tmp/generate_csv.py
+import csv
+import random
+
+with open('/app/dataset.csv', 'w', newline='') as csvfile:
+    fieldnames = ['id', 'value1', 'value2', 'category']
+    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+    
+    writer.writeheader()
+    for i in range(100000):
+        writer.writerow({
+            'id': i + 1,
+            'value1': random.randint(1, 100),
+            'value2': random.randint(1, 100),
+            'category': random.choice(['A', 'B', 'C', 'D'])
+        })
+CSVGEN
+
+RUN python3 /tmp/generate_csv.py && rm /tmp/generate_csv.py
+
+CMD ["/bin/bash"]

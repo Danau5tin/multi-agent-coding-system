@@ -375,7 +375,7 @@ class ActionHandler:
             task: The task object
             store_context: Whether to store contexts in the global store
         """
-        from src.agents.subagent import Subagent, SubagentTask
+        from multi_agent_coding_system.agents.subagent import Subagent, SubagentTask
         if not self.orchestrator_hub:
             raise ValueError("OrchestratorHub is required to launch subagents")
 
@@ -416,7 +416,7 @@ class ActionHandler:
             # Create subagent session tracker if we have a session logger
             subagent_session_tracker = None
             if self.session_logger:
-                from src.misc.session_logger import SubagentSessionTracker
+                from multi_agent_coding_system.misc.session_logger import SubagentSessionTracker
                 subagent_session_tracker = SubagentSessionTracker(
                     parent_logger=self.session_logger,
                     agent_id=subagent_id,

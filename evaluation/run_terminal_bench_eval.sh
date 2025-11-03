@@ -38,7 +38,7 @@ fi
 
 uv run tb run \
     -d terminal-bench-core==0.1.1 \
-    --agent-import-path src.agents.tbench_orchestrator_agent:${AGENT_CLASS} \
+    --agent-import-path multi_agent_coding_system.agents.tbench_orchestrator_agent:${AGENT_CLASS} \
     --n-concurrent-trials "${N_CONCURRENT_TRIALS}" \
     --n-attempts "${N_ATTEMPTS}"
 

@@ -9,6 +9,13 @@ TL;DR:
 
 ## 📰 Releases
 
+### (4th Nov 25) 🌊 Orca-Agent-v0.1 
+
+- RL trained 14B Orca-Agent-v0.1 ([separate repo here](https://github.com/Danau5tin/Orca-Agent-RL))
+    - Qwen3-14B achieved a **160.71% relative increase on Stanford's TerminalBench** after training using this multi-agent framework.
+    - I scaled multi-agent RL training to 32x Nvidia H100s, rolling out 256 concurrent Docker environments simultaneously.
+    - Full training code, model weights, datasets, and documentation are open source in [this repo](https://github.com/Danau5tin/Orca-Agent-RL).
+
 ### (2nd Nov 25)
 - New system & agent abilities:
   - Orchestrator & Subagent can be different models

@@ -41,6 +41,32 @@ The orchestrator's lack of direct code access forces proper delegation and verif
 
 For a full breakdown of this project's code structure, see [here](./PROJECT_STRUCTURE.md)
 
+### Example model output
+The model uses xml tags to define an action, and YAML to define the parameters of an action if they exist. Below shows the model thinking and then dispatching a coder agent.
+```xml
+<think>
+Okay, now with task_003 identifying a backup, the next step would be to attempt recovery using this identified file.
+</think>
+
+<task_create>
+agent_type: 'coder'
+title: 'Attempt recovery using the identified backup file'
+description: |
+  Execute the following steps to recover using the backup identified in task_003:
+  1. Move the identified backup file (/tmp/terraform_work/.terraform.tfstate.tmp) to the target location (/infrastructure/recovered_state.json).
+  2. Verify the operation by checking:
+     - The existence of the new file at the target location
+     - The size matches the original backup file
+     - The file permissions are set appropriately (rw-r--r--)
+max_turns: 10
+context_bootstrap:
+  - path: '/tmp/terraform_work/.terraform.tfstate.tmp'
+    reason: 'The backup file identified in task_003'
+context_refs:
+  - 'task_003'
+</task_create>
+```
+
 
 ## 📈 Evaluation Results
 
